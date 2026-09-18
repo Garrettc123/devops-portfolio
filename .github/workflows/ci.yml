@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect tracked secrets
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
+
+      - name: Validate YAML
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          files = list(Path('.').rglob('*.yml')) + list(Path('.').rglob('*.yaml'))
+          failures = []
+          for file in files:
+              if '.git' in file.parts:
+                  continue
+              try:
+                  yaml.safe_load(file.read_text(encoding='utf-8'))
+              except Exception as exc:
+                  failures.append(f'{file}: {exc}')
+          if failures:
+              raise SystemExit('\n'.join(failures))
+          print(f'Validated {len(files)} YAML file(s).')
+          PY
+
+      - name: Validate Docker Compose files
+        run: |
+          shopt -s globstar nullglob
+          files=(**/docker-compose*.yml **/docker-compose*.yaml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No Docker Compose files found; skipping."
+            exit 0
+          fi
+          for file in "${files[@]}"; do
+            echo "Validating $file"
+            docker compose -f "$file" config --quiet
+          done
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Check Terraform formatting
+        run: |
+          if [ ! -d terraform ]; then
+            echo "No terraform directory found; skipping."
+            exit 0
+          fi
+          find terraform -type f -name '*.tf' -print0 | xargs -0 -r terraform fmt -check -recursive
