@@ -1,0 +1,97 @@
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: swarm-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - swarm-net
+
+  data-ingestion-agent:
+    build:
+      context: ../agents
+      dockerfile: Dockerfile
+    container_name: data-ingestion-agent
+    restart: unless-stopped
+    command: python data_ingestion_agent.py
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swarm-net
+
+  logic-planning-agent:
+    build:
+      context: ../agents
+      dockerfile: Dockerfile
+    container_name: logic-planning-agent
+    restart: unless-stopped
+    command: python logic_planning_agent.py
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swarm-net
+
+  code-execution-agent:
+    build:
+      context: ../agents
+      dockerfile: Dockerfile
+    container_name: code-execution-agent
+    restart: unless-stopped
+    command: python code_execution_agent.py
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swarm-net
+
+  system-monitor-agent:
+    build:
+      context: ../agents
+      dockerfile: Dockerfile
+    container_name: system-monitor-agent
+    restart: unless-stopped
+    command: python system_monitor_agent.py
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swarm-net
+
+  api-router:
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+    container_name: swarm-api-router
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - swarm-net
+
+networks:
+  swarm-net:
+    driver: bridge
